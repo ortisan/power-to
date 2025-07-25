@@ -1,0 +1,23 @@
+{
+  "name": "power-to",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A collaborative platform that empowers citizens to identify, vote on, and prioritize community issues",
+  "scripts": {
+    "commit": "git-cz",
+    "docs:start": "cd docs/website && npm start",
+    "docs:build": "cd docs/website && npm run build",
+    "docs:serve": "cd docs/website && npm run serve"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^17.6.7",
+    "@commitlint/config-conventional": "^17.6.7",
+    "commitizen": "^4.3.0",
+    "cz-conventional-changelog": "^3.3.0"
+  },
+  "config": {
+    "commitizen": {
+      "path": "./node_modules/cz-conventional-changelog"
+    }
+  }
+}
