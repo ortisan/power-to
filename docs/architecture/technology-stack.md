@@ -6,16 +6,16 @@ sidebar_label: Technology Stack
 
 # Technology Stack
 
-This document is the technology baseline as of **2026-07-16**. Implemented
+This document is the technology baseline as of **2026-07-17**. Implemented
 backend versions are pinned by `backend/Cargo.toml`, `backend/Cargo.lock`, and
 the local deployment manifests, then updated through small, tested changes. A
 major version is never adopted merely because it is the newest one.
 
 The executable foundation currently proves the Clean Architecture dependency
-direction, an Axum health/OpenAPI surface, Diesel-async PostgreSQL readiness,
-Atlas bootstrap, OTLP export, and Victoria ingestion. It does not yet prove a
-civic product vertical slice, spatial Diesel mappings, identity, or concrete
-R2/S3/GCS SDK adapters; their proposed status remains meaningful.
+direction, an Axum health/OpenAPI surface, OIDC resource-server authentication,
+an owner-scoped civic issue slice, Diesel-async PostgreSQL persistence, Atlas
+migrations, OTLP export, and Victoria ingestion. Spatial Diesel mappings and
+concrete R2/S3/GCS SDK adapters remain unproven.
 
 `ACCEPTED` means the project owner has made the decision. `PROPOSED` means the
 choice is the current architectural recommendation and should be validated in
@@ -35,7 +35,7 @@ the first vertical slice.
 | Spatial data | PostGIS 3.6 with `postgis_diesel` 3.1 | PROPOSED, spike required | Jurisdiction boundaries, proximity, generalized public locations, GiST indexes, and Diesel mappings |
 | API contract | REST/JSON, OpenAPI 3.1 with Utoipa 5 | PROPOSED | Public, language-neutral contract and generated clients without GraphQL operational complexity |
 | Serialization | Serde 1 and `serde_json` | PROPOSED | Rust ecosystem standard; API DTOs remain separate from domain and Diesel models |
-| Authentication | OpenID Connect Authorization Code flow; Keycloak as local/reference provider | PROPOSED | Standards-based federation and a path to government identity without embedding passwords in PowerTo |
+| Authentication | OpenID Connect Authorization Code + PKCE for clients; strict JWT resource server; Keycloak as local/reference provider | PROPOSED / ADAPTER IMPLEMENTED | Standards-based federation and a path to government identity without embedding passwords in PowerTo |
 | Web application | Next.js App Router, React, TypeScript, Node.js 24 LTS | PROPOSED | Accessible server-rendered public pages, responsive authenticated UI, and a mature web ecosystem |
 | Mobile product clients | Android and iOS apps for media/location capture, bounded geofencing, offline work, and road surveys | **ACCEPTED** | Explicit project decision; on-site evidence and motion sensing require installed mobile clients |
 | Mobile implementation | KMP shared core with Jetpack Compose on Android and SwiftUI on iOS | PROPOSED, physical-device spike required | Shares domain/data/sync logic while keeping camera, sensors, geofence, and background behavior native |
@@ -190,6 +190,17 @@ because it can broker OIDC and SAML identity providers. Production may use a
 managed or government provider behind the same OIDC contract. The choice of
 production operator remains open.
 
+The implemented Rust resource-server adapter uses discovery and provider-owned
+JWKS, accepts only RS256 and RFC 9068 `at+jwt` access tokens, rejects token-owned
+key URLs, applies bounded HTTP responses and timeouts, and refreshes unknown
+keys with a cooldown. It never emits token, issuer, subject, or key identifiers
+to telemetry. The exact configured issuer and API audience are mandatory.
+Verified `(issuer, subject)` pairs map atomically to minimal records in the
+`private` schema; local authorization remains independent of provider roles.
+These checks follow [JWT BCP RFC 8725](https://www.rfc-editor.org/rfc/rfc8725),
+[JWT Access Token Profile RFC 9068](https://www.rfc-editor.org/rfc/rfc9068), and
+[OpenID Connect Discovery](https://openid.net/specs/openid-connect-discovery-1_0.html).
+
 Authentication data and eligibility data are deliberately distinct:
 
 - OIDC subject: who authenticated
@@ -309,7 +320,7 @@ metrics, or trace attributes. See [ADR 0010](decisions/0010-opentelemetry-victor
 Before building product screens, validate the riskiest integrations with small,
 discardable tests:
 
-1. Axum + OIDC JWT verification and jurisdiction-scoped authorization.
+1. Jurisdiction-scoped authorization and eligibility on top of the implemented OIDC actor.
 2. Diesel + `diesel-async` transaction with a uniqueness race between two vote
    attempts.
 3. Atlas replay plus Diesel schema generation for multi-schema PostGIS types,

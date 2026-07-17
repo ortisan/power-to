@@ -14,10 +14,12 @@ report to delivery and public evaluation.
 > a compiling Rust API/worker workspace and an owner-scoped issue-submission
 > flow backed by PostgreSQL/PostGIS. A submission atomically persists its civic
 > record, restricted submitter context, hash-linked audit event, idempotency
-> record, and transactional outbox message. OIDC authentication, outbox
-> processing, moderation, voting, real R2/S3/GCS adapters, and the web, Android,
-> and iOS clients have not been built. PowerTo is not suitable for real civic
-> voting or public-sector procurement.
+> record, and transactional outbox message. Protected routes now validate OIDC
+> JWT access tokens and map verified identities to private local accounts.
+> Outbox processing, moderation, voting, a packaged reference identity provider,
+> real R2/S3/GCS adapters, and the web, Android, and iOS clients have not been
+> built. PowerTo is not suitable for real civic voting or public-sector
+> procurement.
 
 ## Why PowerTo
 
@@ -117,7 +119,7 @@ production-ready.
 | Database | PostgreSQL with PostGIS and a transactional outbox | Proposed / issue intake implemented |
 | HTTP API | Axum/Tokio, REST/JSON, OpenAPI with Utoipa | Proposed / first routes implemented |
 | Web | Next.js, React, and TypeScript with an accessibility-first PWA | Proposed |
-| Identity | OpenID Connect; Keycloak as the local/reference provider | Proposed |
+| Identity | OpenID Connect; Keycloak as the local/reference provider | Proposed / resource-server adapter implemented |
 
 Exact versions, alternatives, and spike criteria live in the
 [technology stack](docs/architecture/technology-stack.md).
@@ -147,12 +149,18 @@ command is rejected. Responses are private and non-cacheable, and
 request bodies, actor identifiers, idempotency keys, free-form text, and exact
 coordinates are excluded from telemetry.
 
-OIDC actor resolution is still pending, so these routes fail closed by default.
-For local development only, an explicitly enabled insecure account header is
-accepted while the API is both in the `local` environment and bound to a
-loopback address. It is not authentication and cannot be enabled for a remote
-bind. Categories are currently validated slugs rather than references to a
-canonical jurisdiction catalog, and no jurisdiction is derived yet.
+These routes accept an OIDC JWT access token through `Authorization: Bearer`.
+The Rust adapter discovers the provider, validates the exact issuer, API
+audience, `at+jwt` token type, RS256 signature, lifetime, and signing key, then
+atomically resolves or provisions a private local account from `(issuer,
+subject)`. Tokens, names, and email addresses are not persisted. Suspended or
+closed accounts cannot act, and provider/JWKS failures fail closed.
+
+For local development only, an explicitly enabled insecure account header can
+replace OIDC while the API is both in the `local` environment and bound to a
+loopback address. The two modes cannot be enabled together. Categories are
+currently validated slugs rather than references to a canonical jurisdiction
+catalog, and no jurisdiction is derived yet.
 
 ### Photos and videos
 

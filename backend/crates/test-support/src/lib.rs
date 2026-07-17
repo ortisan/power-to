@@ -8,11 +8,45 @@ use std::{
 use async_trait::async_trait;
 use chrono::Utc;
 use powerto_application::health::{ReadinessError, ReadinessProbe};
+use powerto_application::identity::{
+    ActorAuthenticator, AuthenticatedActor, AuthenticationError, PresentedCredential,
+};
 use powerto_application::issues::{
     IdempotencyKey, IssueStore, IssueStoreError, PersistIssueOutcome, ReplayLookup,
     SubmissionFingerprint,
 };
 use powerto_domain::{AccountId, Issue, IssueReference, IssueSubmission};
+
+/// Authentication double with a deterministic safe result.
+pub struct FixedAuthenticator {
+    result: Result<AuthenticatedActor, AuthenticationError>,
+}
+
+impl FixedAuthenticator {
+    /// Always authenticates as the supplied local account.
+    #[must_use]
+    pub const fn authenticated(account_id: AccountId) -> Self {
+        Self {
+            result: Ok(AuthenticatedActor::new(account_id)),
+        }
+    }
+
+    /// Always returns the supplied authentication failure.
+    #[must_use]
+    pub const fn failing(error: AuthenticationError) -> Self {
+        Self { result: Err(error) }
+    }
+}
+
+#[async_trait]
+impl ActorAuthenticator for FixedAuthenticator {
+    async fn authenticate(
+        &self,
+        _credential: &PresentedCredential,
+    ) -> Result<AuthenticatedActor, AuthenticationError> {
+        self.result
+    }
+}
 
 /// Readiness double with a deterministic result.
 #[derive(Clone, Copy, Debug)]

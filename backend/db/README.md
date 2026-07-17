@@ -12,13 +12,15 @@ backend/db/
   migrations/
     20260716000100_bootstrap.sql
     20260716000200_issue_intake.sql
+    20260717000100_oidc_identity.sql
     atlas.sum
 ```
 
 The bootstrap migration enables PostGIS and creates the `civic`, `private`,
 `audit`, `jobs`, and `evidence` schemas. The issue-intake migration enables
-`pgcrypto` and creates the first product tables. Neither migration creates
-roles, grants, or environment-specific objects.
+`pgcrypto` and creates the first product tables. The identity migration adds
+minimal private local accounts and OIDC issuer/subject mappings. No migration
+creates roles, grants, or environment-specific objects.
 
 ## First vertical-slice schema
 
@@ -31,6 +33,8 @@ One issue submission is persisted atomically across these boundaries:
 | `private.issue_submission_idempotency` | SHA-256 key digest plus a versioned normalized-command fingerprint; never the raw idempotency key |
 | `audit.events` | Per-stream versioned canonical bytes with a PostgreSQL-generated SHA-256 hash chain and triggers rejecting update, delete, and truncate |
 | `jobs.outbox_messages` | Privacy-minimal integration message linked to the committed audit event |
+| `private.accounts` | Provider-independent local account and authorization status |
+| `private.account_identities` | Minimal unique OIDC `(issuer, subject)` mapping; never tokens or profile claims |
 
 The Diesel/`diesel-async` adapter writes all five records in one PostgreSQL
 transaction. An idempotent replay reads the same issue's current owner-scoped
@@ -44,6 +48,13 @@ The concurrent reservation algorithm is tested under PostgreSQL's default
 `READ COMMITTED` isolation: a competing `INSERT ... ON CONFLICT DO NOTHING`
 waits for the winning transaction and then loads its committed idempotency row.
 Changing transaction isolation requires a new concurrency test and review.
+
+First-login identity provisioning uses a transaction-scoped advisory lock over
+the issuer/subject pair, checks the mapping again after taking the lock, and
+creates one UUIDv7 account plus one identity row. Concurrent valid logins
+therefore converge without orphan accounts. Hash collisions only serialize
+unrelated provisioning transactions; uniqueness constraints remain the source
+of correctness.
 
 Production must use a separate non-owner runtime role with only the required
 schema/table privileges. In particular, it must not be able to update, delete,

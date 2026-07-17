@@ -2,11 +2,13 @@ use std::{env, net::SocketAddr, num::NonZeroU32, sync::Arc, time::Duration};
 
 use anyhow::{Context as _, Result, bail};
 use powerto_adapters::{
+    account_directory::PostgresAccountDirectory,
     database::{PostgresReadiness, create_pool},
     issue_store::PostgresIssueStore,
     observability::{TelemetryConfig, init_telemetry},
+    oidc::{OidcActorAuthenticator, OidcConfig},
 };
-use powerto_api::{ApiState, LocalActorHeaderMode, router};
+use powerto_api::{ActorAuthentication, ApiState, router};
 use powerto_application::issues::IssueService;
 
 #[tokio::main]
@@ -27,6 +29,32 @@ async fn main() -> Result<()> {
     )
     .await
     .context("PostgreSQL connection pool initialization failed")?;
+    let actor_authentication = match config.authentication {
+        AuthenticationConfig::Oidc {
+            issuer,
+            audience,
+            clock_skew,
+            http_timeout,
+            jwks_refresh_interval,
+            allow_insecure_loopback_http,
+        } => ActorAuthentication::Oidc(Arc::new(
+            OidcActorAuthenticator::discover(
+                OidcConfig {
+                    issuer,
+                    audience,
+                    clock_skew,
+                    http_timeout,
+                    jwks_refresh_interval,
+                    allow_insecure_loopback_http,
+                },
+                Arc::new(PostgresAccountDirectory::new(pool.clone())),
+            )
+            .await
+            .context("OIDC authentication initialization failed")?,
+        )),
+        AuthenticationConfig::InsecureLoopbackHeader => ActorAuthentication::InsecureLoopbackHeader,
+        AuthenticationConfig::Disabled => ActorAuthentication::Disabled,
+    };
     let state = ApiState::new(
         Arc::new(PostgresReadiness::new(
             pool.clone(),
@@ -36,7 +64,7 @@ async fn main() -> Result<()> {
             Arc::new(PostgresIssueStore::new(pool)),
             config.privacy_notice_version.clone(),
         ),
-        config.local_actor_header_mode,
+        actor_authentication,
     );
     let listener = tokio::net::TcpListener::bind(config.http_address)
         .await
@@ -55,16 +83,28 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug)]
 struct Config {
+    authentication: AuthenticationConfig,
     database_url: String,
     database_pool_size: NonZeroU32,
     database_timeout: Duration,
     environment: String,
     http_address: SocketAddr,
-    local_actor_header_mode: LocalActorHeaderMode,
     otlp_endpoint: Option<String>,
     privacy_notice_version: String,
+}
+
+enum AuthenticationConfig {
+    Disabled,
+    InsecureLoopbackHeader,
+    Oidc {
+        issuer: String,
+        audience: String,
+        clock_skew: Duration,
+        http_timeout: Duration,
+        jwks_refresh_interval: Duration,
+        allow_insecure_loopback_http: bool,
+    },
 }
 
 impl Config {
@@ -101,22 +141,67 @@ impl Config {
         if insecure_local_actor && !http_address.ip().is_loopback() {
             bail!("the insecure local actor header requires a loopback HTTP address");
         }
+        let oidc_issuer = env::var("POWERTO_OIDC_ISSUER").ok();
+        let oidc_audience = env::var("POWERTO_OIDC_AUDIENCE").ok();
+        let authentication = match (oidc_issuer, oidc_audience) {
+            (Some(issuer), Some(audience)) => {
+                if issuer.trim().is_empty() || audience.trim().is_empty() {
+                    bail!("POWERTO_OIDC_ISSUER and POWERTO_OIDC_AUDIENCE must not be blank");
+                }
+                if insecure_local_actor {
+                    bail!("OIDC and the insecure local actor header cannot be enabled together");
+                }
+                AuthenticationConfig::Oidc {
+                    issuer,
+                    audience,
+                    clock_skew: duration_from_env("POWERTO_OIDC_CLOCK_SKEW_SECONDS", 30, 0, 300)?,
+                    http_timeout: duration_from_env("POWERTO_OIDC_HTTP_TIMEOUT_SECONDS", 3, 1, 30)?,
+                    jwks_refresh_interval: duration_from_env(
+                        "POWERTO_OIDC_JWKS_REFRESH_SECONDS",
+                        300,
+                        30,
+                        86_400,
+                    )?,
+                    allow_insecure_loopback_http: environment == "local",
+                }
+            }
+            (Some(_), None) | (None, Some(_)) => {
+                bail!("POWERTO_OIDC_ISSUER and POWERTO_OIDC_AUDIENCE must be set together")
+            }
+            (None, None) if insecure_local_actor => AuthenticationConfig::InsecureLoopbackHeader,
+            (None, None) if environment == "local" => AuthenticationConfig::Disabled,
+            (None, None) => {
+                bail!("POWERTO_OIDC_ISSUER and POWERTO_OIDC_AUDIENCE are required outside local")
+            }
+        };
 
         Ok(Self {
+            authentication,
             database_url,
             database_pool_size: pool_size,
             database_timeout: Duration::from_millis(database_timeout_ms),
             environment,
             http_address,
-            local_actor_header_mode: if insecure_local_actor {
-                LocalActorHeaderMode::InsecureLoopbackOnly
-            } else {
-                LocalActorHeaderMode::Disabled
-            },
             otlp_endpoint: env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok(),
             privacy_notice_version,
         })
     }
+}
+
+fn duration_from_env(
+    name: &str,
+    default_seconds: u64,
+    minimum_seconds: u64,
+    maximum_seconds: u64,
+) -> Result<Duration> {
+    let seconds = env::var(name)
+        .unwrap_or_else(|_| default_seconds.to_string())
+        .parse::<u64>()
+        .with_context(|| format!("{name} must be a non-negative integer"))?;
+    if !(minimum_seconds..=maximum_seconds).contains(&seconds) {
+        bail!("{name} must be between {minimum_seconds} and {maximum_seconds}");
+    }
+    Ok(Duration::from_secs(seconds))
 }
 
 async fn shutdown_signal() {

@@ -23,11 +23,15 @@ axum = { version = "0.8.9", default-features = false, features = ["http1", "json
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde"] }
 diesel = { version = "~2.3.11", default-features = false, features = ["32-column-tables", "chrono", "serde_json", "uuid"] }
 diesel-async = { version = "0.9.2", features = ["bb8", "postgres"] }
+jsonwebtoken = { version = "10.4.0", default-features = false, features = ["rust_crypto"] }
 opentelemetry = { version = "0.32.0", default-features = false, features = ["logs", "metrics", "trace"] }
 opentelemetry-appender-tracing = { version = "0.32.0", default-features = false }
 opentelemetry-http = { version = "0.32.0", default-features = false }
 opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["grpc-tonic", "logs", "metrics", "tls-ring", "tls-roots", "trace"] }
 opentelemetry_sdk = { version = "0.32.1", default-features = false, features = ["logs", "metrics", "trace"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
+rand = "0.8.7"
+rsa = "0.9.10"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 sha2 = "0.11.0"

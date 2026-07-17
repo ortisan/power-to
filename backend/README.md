@@ -1,18 +1,19 @@
 # PowerTo backend
 
 This directory contains the executable backend foundation and the first civic
-vertical slice: a citizen-shaped account can submit a confirmed issue and read
-that same issue back within its private owner scope. Moderation, voting, media
-upload, jurisdiction policy, and road-survey use cases are not implemented yet.
+vertical slice: an OIDC-authenticated account can submit a confirmed issue and
+read that same issue back within its private owner scope. Moderation, voting,
+media upload, jurisdiction policy, and road-survey use cases are not implemented
+yet.
 
 ## Structure
 
 ```text
-apps/api          Axum composition root, issue/health routes, and OpenAPI
+apps/api          Axum composition root, OIDC, issue/health routes, and OpenAPI
 apps/worker       background-process composition root; no outbox consumer yet
 crates/domain     framework-independent issue types and invariants
 crates/application issue use cases and purpose-specific ports
-crates/adapters   diesel-async/PostgreSQL, storage configuration, and telemetry
+crates/adapters   OIDC/JWKS, diesel-async/PostgreSQL, storage, and telemetry
 crates/test-support deterministic test doubles, including issue persistence
 db                Atlas versioned PostgreSQL/PostGIS migrations
 deploy/observability OpenTelemetry Collector and Victoria development stack
@@ -109,20 +110,54 @@ HTTP method, route template, and status attributes; it does not record the
 request body, issue/account references, idempotency key, free-form citizen text,
 or coordinates.
 
-### Temporary local actor
+## Authentication
 
-OIDC authentication and actor resolution are not implemented. Issue routes
-therefore return `401` by default. A deliberately insecure development adapter
-can be enabled only when `POWERTO_ENVIRONMENT=local` and
-`POWERTO_HTTP_ADDRESS` is a loopback address:
+Protected routes require an OIDC JWT access token. At startup, the API uses
+OpenID Connect Discovery, requires the returned issuer to exactly match
+`POWERTO_OIDC_ISSUER`, retrieves a bounded JWKS document, and caches its keys.
+Access tokens must use `typ: at+jwt` (or `application/at+jwt`), an RS256 signing
+key from that JWKS, the configured audience, and valid `iss`, `sub`, `exp`, and
+`iat` claims. `nbf` is enforced when present. Unknown signing keys trigger a
+rate-limited refresh; a known cached key may remain usable during a temporary
+refresh failure.
+
+After cryptographic validation, `(issuer, subject)` is atomically mapped to a
+UUIDv7 local account in `private.account_identities`. The database stores no
+token, name, or email. An `active` account may act; `suspended` and `closed`
+accounts receive `403`. Missing or invalid credentials receive `401` with
+`WWW-Authenticate: Bearer`, and provider/directory outages receive `503`.
+
+Keycloak is the reference provider but is not packaged in Compose yet. Its API
+client must include this API in the token audience and enable **Use at+jwt as
+access token header type**. Mobile and web public clients must use Authorization
+Code with PKCE; PowerTo does not collect passwords or use the resource-owner
+password flow. See the [Keycloak `at+jwt` setting](https://www.keycloak.org/2025/04/keycloak-2620-released),
+[RFC 9068](https://www.rfc-editor.org/rfc/rfc9068), and [OpenID Connect
+Discovery](https://openid.net/specs/openid-connect-discovery-1_0.html).
+
+Configure a provider and run the API:
+
+```sh
+export POWERTO_OIDC_ISSUER='https://identity.example/realms/powerto'
+export POWERTO_OIDC_AUDIENCE='powerto-api'
+cargo run -p powerto-api
+```
+
+Outside `local`, both OIDC variables are mandatory. Plain HTTP discovery/JWKS
+is rejected, except for a loopback provider in the `local` environment.
+
+### Insecure local test actor
+
+A deliberately insecure development adapter can replace OIDC only when
+`POWERTO_ENVIRONMENT=local` and `POWERTO_HTTP_ADDRESS` is a loopback address:
 
 ```sh
 export POWERTO_ALLOW_INSECURE_LOCAL_ACTOR_HEADER=true
 cargo run -p powerto-api
 ```
 
-Stop the earlier API process before restarting it with this option. The process
-refuses the setting outside `local` or on a non-loopback bind. The
+The process refuses this setting outside `local`, on a non-loopback bind, or
+when OIDC variables are also set. The
 `x-powerto-local-account-id` header is only a local test seam; it is not an
 authentication design and must never be exposed over a network.
 
@@ -177,6 +212,11 @@ readiness dependency; PostgreSQL is.
 | `POWERTO_HTTP_ADDRESS` | API only, no | `127.0.0.1:8080` | API listen socket |
 | `POWERTO_ENVIRONMENT` | no | `local` | OTLP deployment environment resource |
 | `POWERTO_PRIVACY_NOTICE_VERSION` | outside `local` | `privacy-v1` in `local` | Privacy notice accepted for new issue submissions |
+| `POWERTO_OIDC_ISSUER` | outside `local`; paired with audience | none | Exact OIDC issuer used for discovery and token validation |
+| `POWERTO_OIDC_AUDIENCE` | outside `local`; paired with issuer | none | Audience required in API access tokens |
+| `POWERTO_OIDC_CLOCK_SKEW_SECONDS` | no | `30` | Allowed clock skew for token claims, from 0 through 300 |
+| `POWERTO_OIDC_HTTP_TIMEOUT_SECONDS` | no | `3` | Discovery and JWKS timeout, from 1 through 30 |
+| `POWERTO_OIDC_JWKS_REFRESH_SECONDS` | no | `300` | Key-cache refresh interval, from 30 through 86400 |
 | `POWERTO_ALLOW_INSECURE_LOCAL_ACTOR_HEADER` | no | `false` | Enables the local loopback-only test actor; never production authentication |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | no | none | Enables OTLP/gRPC export to the Collector |
 | `RUST_LOG` | no | `info` | `tracing-subscriber` filter |

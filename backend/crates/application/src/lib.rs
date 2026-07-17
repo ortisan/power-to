@@ -4,4 +4,5 @@
 //! may depend on the domain but never on adapters, frameworks, or providers.
 
 pub mod health;
+pub mod identity;
 pub mod issues;
