@@ -4,8 +4,8 @@ module.exports = {
   url: 'https://your-docusaurus-site.example.com',
   baseUrl: '/',
   favicon: 'img/logo.svg',
-  organizationName: 'power-to', // Usually your GitHub org/user name.
-  projectName: 'power-to', // Usually your repo name.
+  organizationName: 'ortisan',
+  projectName: 'power-to',
   themeConfig: {
     navbar: {
       title: 'PowerTo Docs',
@@ -15,23 +15,23 @@ module.exports = {
       },
       items: [
         {
-          to: 'intro',
+          to: '/',
           activeBasePath: 'docs',
           label: 'Documentation',
           position: 'left',
         },
         {
-          to: 'architecture/decisions/0000-adr-template',
+          to: '/architecture/overview',
           label: 'Architecture',
           position: 'left',
         },
         {
-          to: 'development/formatter-setup',
+          to: '/development/formatter-setup',
           label: 'Development',
           position: 'left',
         },
         {
-          to: 'models/issue-proposal-model',
+          to: '/models/issue-proposal-model',
           label: 'Models',
           position: 'left',
         },
@@ -50,19 +50,19 @@ module.exports = {
           items: [
             {
               label: 'Introduction',
-              to: 'intro',
+              to: '/',
             },
             {
               label: 'Architecture',
-              to: 'architecture/decisions/0000-adr-template',
+              to: '/architecture/overview',
             },
             {
               label: 'Development',
-              to: 'development/formatter-setup',
+              to: '/development/formatter-setup',
             },
             {
               label: 'Models',
-              to: 'models/issue-proposal-model',
+              to: '/models/issue-proposal-model',
             },
           ],
         },
@@ -85,6 +85,8 @@ module.exports = {
       {
         docs: {
           path: '../',
+          routeBasePath: '/',
+          exclude: ['website/**'],
           sidebarPath: require.resolve('./sidebars.js'),
           editUrl: 'https://github.com/ortisan/power-to/edit/main/docs/',
         },

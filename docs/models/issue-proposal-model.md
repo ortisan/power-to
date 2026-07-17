@@ -1,105 +1,175 @@
 # Issue Proposal Model
 
-## Overview
+## Purpose and status
 
-This document defines the standard model for proposing issues in the PowerTo platform. Following this model ensures that all necessary information is provided for community members to understand, evaluate, and vote on proposed issues.
+This document defines the product-level information needed to report a civic
+problem. It is a working model for the MVP, not a finalized API or database
+schema. Field limits, categories, moderation policy, geographic eligibility,
+and public-location precision remain versioned jurisdiction policy.
 
-## Issue Proposal Structure
+An issue proposal records an observed problem and its affected area. It does
+not promise funding, procurement, or execution, and it does not require the
+submitter to design a solution.
 
-### Basic Information
+## Modeling principles
 
-| Field | Description | Required | Type |
-|-------|-------------|----------|------|
-| Title | A concise, descriptive title for the issue | Yes | String (max 100 chars) |
-| Category | The category that best describes the issue | Yes | Enum (Infrastructure, Public Safety, Environment, Education, Healthcare, Transportation, Other) |
-| Location | The specific location affected by the issue | Yes | String |
-| Summary | A brief summary of the issue | Yes | String (max 250 chars) |
+- Capture the problem, impact, and desired outcome without forcing a proposed
+  technical solution.
+- Keep authentication and private contact data outside the public issue
+  record. An OIDC subject links the submission to its account internally.
+- Store the confirmed issue geometry separately from the privacy-safe geometry
+  or label published to other users.
+- Treat photos, videos, documents, links, and road-survey observations as
+  evidence with provenance and moderation state, not as proof by themselves.
+- Configure categories and participation rules by jurisdiction instead of
+  hard-coding street, district, city, or state weights in this model.
+- Redirect emergencies and immediate threats to the responsible emergency
+  channel; PowerTo is not an emergency-response service.
 
-### Detailed Description
+## Proposal structure
 
-| Field | Description | Required | Type |
-|-------|-------------|----------|------|
-| Problem Statement | Detailed description of the problem | Yes | Text |
-| Affected Community | Description of who is affected by this issue | Yes | Text |
-| Current Situation | Description of the current state | Yes | Text |
-| Desired Outcome | Description of the desired outcome if the issue is resolved | Yes | Text |
-| Proposed Solution | Optional suggestion for how to address the issue | No | Text |
-| Timeline Considerations | Any time constraints or considerations | No | Text |
+### Problem
 
-### Supporting Information
+| Field | Required | Visibility | Purpose |
+| --- | --- | --- | --- |
+| `title` | yes | public after moderation | Concise, neutral description of the problem |
+| `category_id` | yes | public | Jurisdiction-configured category reference |
+| `summary` | yes | public | Short explanation suitable for lists and maps |
+| `problem_statement` | yes | public after moderation | Observable facts, duration, frequency, and current condition |
+| `affected_community` | yes | public after moderation | People or public services affected, without naming private individuals |
+| `desired_outcome` | yes | public after moderation | What improvement would mean, without prescribing procurement |
+| `proposed_solution` | no | public after moderation | Submitter suggestion clearly labeled as non-binding |
+| `previous_attempts` | no | public after moderation | Existing public protocols or attempts, with private data removed |
+| `time_context` | no | public after moderation | Relevant recurrence, season, or non-emergency timing |
 
-| Field | Description | Required | Type |
-|-------|-------------|----------|------|
-| Images | Photos or images that illustrate the issue | No | File Upload (max 5) |
-| Documents | Supporting documents or references | No | File Upload (max 3) |
-| External Links | Links to relevant external resources | No | URLs (max 5) |
-| Estimated Impact | Estimated number of people affected | Yes | Number |
-| Previous Attempts | Description of any previous attempts to address this issue | No | Text |
+Text limits, supported languages, and content policy belong to the versioned
+submission policy. The UI must explain those limits before upload or submit.
 
-### Contact Information
+### Geography
 
-| Field | Description | Required | Type |
-|-------|-------------|----------|------|
-| Proposer Name | Name of the person proposing the issue | Yes | String |
-| Contact Email | Email for follow-up questions | Yes | Email |
-| Organization | Organization the proposer represents (if any) | No | String |
-| Public Contact | Whether contact information can be made public | Yes | Boolean |
+| Field | Required | Visibility | Purpose |
+| --- | --- | --- | --- |
+| `observed_geometry` | yes | restricted by policy | User-confirmed point or affected area in WGS 84 |
+| `geometry_source` | yes | private operational metadata | Map selection, current device position, or geocoded search result |
+| `public_geometry` | derived | public | Policy-approved representation that does not expose a person's private location |
+| `jurisdiction_id` | derived and confirmed | public | Responsible or affected administrative jurisdiction |
+| `location_label` | no | public after moderation | Safe landmark, road segment, or area description |
 
-## Example Issue Proposal
+Device location is a convenience input, not evidence of residence, identity,
+or eligibility. A submitter must confirm the point or area on the map before
+submission. Moderators may correct geography while preserving who changed it,
+why, and which previous value existed.
 
-### Basic Information
-- **Title**: Dangerous Intersection at Main St. and Oak Ave.
-- **Category**: Transportation
-- **Location**: Intersection of Main Street and Oak Avenue
-- **Summary**: The intersection lacks proper traffic signals and has poor visibility, resulting in frequent near-misses and three accidents in the past year.
+### Supporting evidence
 
-### Detailed Description
-- **Problem Statement**: The intersection of Main Street and Oak Avenue has become increasingly dangerous due to increased traffic volume, poor visibility due to overgrown vegetation, and lack of proper traffic signals. Currently, there are only stop signs on Oak Avenue, while Main Street traffic does not stop.
-- **Affected Community**: All residents who use this intersection, particularly the 500+ families in the Oak Hill neighborhood who must use this route daily, as well as students walking to Lincoln Elementary School.
-- **Current Situation**: The intersection has stop signs only on Oak Avenue. Visibility is limited by overgrown vegetation on the northeast corner. There have been three reported accidents in the past year and numerous near-misses.
-- **Desired Outcome**: A safe intersection with proper traffic control and good visibility that prevents accidents and allows for safe pedestrian crossing.
-- **Proposed Solution**: Install a four-way stop or traffic light, trim vegetation to improve visibility, and add pedestrian crosswalks with signage.
-- **Timeline Considerations**: School year begins in September, so ideally improvements would be completed before then to ensure student safety.
+| Field | Required | Visibility | Purpose |
+| --- | --- | --- | --- |
+| `media` | no | restricted until processed | Photo/video media IDs uploaded through the quarantine workflow |
+| `documents` | no | restricted until processed | Supporting document media IDs when jurisdiction policy allows them |
+| `external_links` | no | public after moderation | References to relevant public sources |
+| `estimated_impact` | no | public after moderation | Clearly labeled submitter estimate and its basis |
+| `road_observations` | no | aggregated only | References to consented road-survey batches processed separately |
 
-### Supporting Information
-- **Images**: [Photos of the intersection from different angles]
-- **Documents**: [Traffic incident report from local police department]
-- **External Links**: [Link to news article about recent accident]
-- **Estimated Impact**: Approximately 2,000 people use this intersection daily
-- **Previous Attempts**: A request was submitted to the city transportation department in 2022 but was not prioritized due to budget constraints.
+Uploads are private by default. The media pipeline verifies size and type,
+scans content, removes metadata where applicable, creates safe derivatives,
+and exposes only authorized results. Original filenames, signed provider URLs,
+and storage SDK types are not part of this model.
 
-### Contact Information
-- **Proposer Name**: Jane Smith
-- **Contact Email**: jane.smith@example.com
-- **Organization**: Oak Hill Neighborhood Association
-- **Public Contact**: Yes
+A raw accelerometer stream or a single trip must never appear as a public road
+quality score. Public road segments require the calibrated aggregation,
+uncertainty, and privacy thresholds described in
+[mobile capture and road sensing](../architecture/mobile-sensing.md).
 
-## Submission Process
+### Submitter and consent
 
-1. Complete all required fields in the issue proposal form
-2. Upload any supporting images or documents
-3. Review your submission for completeness and accuracy
-4. Submit the proposal for community review
-5. Respond to any clarification questions from the community or moderators
+| Field | Required | Visibility | Purpose |
+| --- | --- | --- | --- |
+| `submitted_by` | yes | private | Internal account reference derived from the authenticated OIDC subject |
+| `organization_id` | no | public only when authorized | Verified organization represented by the submitter |
+| `notification_preferences` | no | private | Follow-up channels and state changes requested by the user |
+| `public_attribution_consent` | yes | private decision | Whether an approved display name may be shown; default is anonymous |
+| `evidence_rights_attestation` | when evidence exists | private audit | Confirmation that the user may submit the material |
+| `privacy_notice_version` | yes | private audit | Notice accepted for this submission |
 
-## After Submission
+The proposal form does not request a name or email for publication. Contact
+attributes remain in the identity/profile boundary and are disclosed only to
+authorized workflows. Withdrawing public attribution does not delete the
+private accountability record or a legally required audit event.
 
-Once submitted, your issue proposal will:
+## Example
 
-1. Be reviewed by moderators for completeness and appropriateness
-2. Be published to the community for voting and discussion
-3. Receive a unique tracking ID for reference
-4. Enter the voting phase where community members can vote and comment
-   - Votes from citizens who share the same street, district, or state as the reported issue are given higher priority
-   - This ensures that those most directly affected by the issue have the strongest voice in the prioritization process
-5. Be prioritized based on community votes, with emphasis on votes from directly affected citizens
-6. If highly prioritized, undergo cost analysis and feasibility assessment
+```yaml
+title: "Deep pothole on the eastbound bus lane"
+category_id: "road-surface"
+summary: "A recurring pothole forces buses and bicycles into the adjacent lane."
+problem_statement: >
+  The pavement has an open depression on the bus lane. It remains present on
+  repeated observations and collects water after rain.
+affected_community: "Bus passengers, cyclists, drivers, and nearby pedestrians."
+desired_outcome: "Restore a level, safely usable road surface and verify the repair."
+observed_geometry: "user-confirmed point on the map"
+location_label: "Eastbound bus lane near the public library"
+media:
+  - "opaque-media-reference"
+public_attribution_consent: false
+```
 
-## Guidelines for Effective Issue Proposals
+The example deliberately omits coordinates, personal contact details, storage
+URLs, and a procurement prescription. API fixtures must use synthetic data.
 
-1. **Be specific**: Clearly define the problem and affected area
-2. **Be objective**: Present facts rather than opinions
-3. **Be comprehensive**: Include all relevant information
-4. **Be solution-oriented**: Focus on outcomes rather than blame
-5. **Be community-minded**: Consider the broader impact on the community
-6. **Be realistic**: Consider practical constraints and feasibility
+## Submission and moderation flow
+
+1. Save an encrypted local draft when the client is offline.
+2. Validate required fields, acknowledgements, evidence limits, and confirmed
+   geography before upload.
+3. Upload evidence to private quarantine and submit only opaque media
+   references with the proposal command.
+4. Assign an opaque public tracking reference and place the proposal in
+   moderation; submission does not make it public.
+5. Detect likely duplicates and let a moderator link, merge, request
+   clarification, publish, reject, or escalate the proposal under a versioned
+   policy.
+6. Record every moderation transition, reason, actor, policy version, and
+   privacy-safe audit receipt.
+7. Notify the submitter without placing message content or contact attributes
+   in telemetry.
+
+An issue may move through states such as:
+
+```text
+draft -> submitted -> in_moderation -> needs_clarification
+      -> published | rejected -> appeal/review when policy allows
+```
+
+Published issues may later enter a separately versioned voting period. Voting
+eligibility, weights, quorum, thresholds, ties, and withdrawal rules are not
+encoded in the proposal model. The voting use case stores an eligibility
+snapshot explaining which rule version applied without publishing a citizen's
+address or ballot.
+
+## MVP boundary
+
+A highly supported issue can become prioritized and tracked, but the MVP does
+not automatically start cost analysis, choose a service provider, approve a
+budget, or create a government obligation. Feasibility, proposals,
+procurement, delivery, payments, and citizen acceptance are later product
+phases that require a real jurisdiction and legal governance.
+
+Blockchain is also outside this submission flow. The initial integrity model
+uses PostgreSQL transactions, append-oriented audit evidence, signed
+checkpoints, and privacy-safe receipts as described in
+[ADR 0008](../architecture/decisions/0008-relational-vote-ledger.md).
+
+## Safety and privacy checks
+
+- Reject secrets, authentication tokens, signed URLs, and provider object keys
+  from public fields.
+- Warn users not to upload faces, license plates, home addresses, minors, or
+  unrelated bystanders when they are unnecessary to document the problem.
+- Strip image/video location metadata from public derivatives while retaining
+  only policy-authorized evidence provenance.
+- Never emit proposal text, precise geometry, media references, identity data,
+  or raw sensor samples to logs, metrics, or traces.
+- Provide accessible map alternatives and a non-map way to describe the area.
+- Preserve a clear emergency redirect and moderation route for illegal,
+  dangerous, defamatory, or personally identifying content.

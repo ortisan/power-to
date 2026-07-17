@@ -1,0 +1,142 @@
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 384
+    spike_limit_mib: 96
+
+  # Defense in depth only. Application instrumentation must still avoid all
+  # citizen content, exact locations, tokens, and signed object URLs.
+  attributes/privacy:
+    actions:
+      - key: client.address
+        action: delete
+      - key: db.query.text
+        action: delete
+      - key: db.statement
+        action: delete
+      - key: enduser.id
+        action: delete
+      - key: http.request.header.authorization
+        action: delete
+      - key: http.response.header.set-cookie
+        action: delete
+      - key: http.target
+        action: delete
+      - key: network.peer.address
+        action: delete
+      - key: url.query
+        action: delete
+      - key: user.address
+        action: delete
+      - key: user.email
+        action: delete
+      - key: user.id
+        action: delete
+
+  resource/privacy:
+    attributes:
+      - key: enduser.id
+        action: delete
+      - key: user.address
+        action: delete
+      - key: user.email
+        action: delete
+      - key: user.id
+        action: delete
+
+  # VictoriaMetrics works best with cumulative metrics. The PowerTo Rust SDK
+  # already emits cumulative data; this also normalizes future OTLP producers.
+  deltatocumulative:
+    max_stale: 5m
+    max_streams: 100000
+
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+
+exporters:
+  otlphttp/victoria-metrics:
+    compression: gzip
+    encoding: proto
+    metrics_endpoint: http://victoria-metrics:8428/opentelemetry/v1/metrics
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      queue_size: 2048
+
+  otlphttp/victoria-logs:
+    compression: gzip
+    encoding: proto
+    logs_endpoint: http://victoria-logs:9428/insert/opentelemetry/v1/logs
+    headers:
+      VL-Stream-Fields: service.name,service.namespace,deployment.environment.name
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      queue_size: 2048
+
+  otlphttp/victoria-traces:
+    compression: gzip
+    encoding: proto
+    traces_endpoint: http://victoria-traces:10428/insert/opentelemetry/v1/traces
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      queue_size: 2048
+
+service:
+  extensions:
+    - health_check
+  pipelines:
+    metrics:
+      receivers:
+        - otlp
+      processors:
+        - memory_limiter
+        - attributes/privacy
+        - resource/privacy
+        - deltatocumulative
+        - batch
+      exporters:
+        - otlphttp/victoria-metrics
+    logs:
+      receivers:
+        - otlp
+      processors:
+        - memory_limiter
+        - attributes/privacy
+        - resource/privacy
+        - batch
+      exporters:
+        - otlphttp/victoria-logs
+    traces:
+      receivers:
+        - otlp
+      processors:
+        - memory_limiter
+        - attributes/privacy
+        - resource/privacy
+        - batch
+      exporters:
+        - otlphttp/victoria-traces

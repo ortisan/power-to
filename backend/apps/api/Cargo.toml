@@ -1,0 +1,33 @@
+[package]
+name = "powerto-api"
+description = "PowerTo HTTP API composition root"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+chrono.workspace = true
+opentelemetry.workspace = true
+opentelemetry-http.workspace = true
+powerto-adapters.workspace = true
+powerto-application.workspace = true
+powerto-domain.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-opentelemetry.workspace = true
+utoipa.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+powerto-test-support.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

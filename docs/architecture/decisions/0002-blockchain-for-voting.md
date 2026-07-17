@@ -7,7 +7,8 @@ title: Blockchain for Voting
 
 ## Status
 
-PROPOSED
+ON HOLD — excluded from the MVP pending a voting threat model, independent
+validator governance, and comparison with ADR 0008.
 
 ## Context
 
@@ -33,11 +34,18 @@ Key questions to address:
 
 ## Decision
 
-We will implement blockchain technology specifically for the voting system of the PowerTo platform, while using traditional secure database systems for other aspects including audit logging.
+This record makes no current implementation decision while it is on hold. ADR
+0008 is the active proposal for the first voting ledger. Hyperledger Iroha 2 is
+the first open-source Rust candidate for a later permissioned-ledger spike if
+independent validator governance becomes real.
 
-### Blockchain-Based Voting System
+The following Fabric design is retained only as the original proposal and must
+not be treated as the target architecture.
 
-We will implement a permissioned blockchain network using Hyperledger Fabric to handle the voting process:
+### Historical Blockchain-Based Voting Proposal
+
+The original proposal would use a permissioned Hyperledger Fabric network to
+handle voting:
 
 - **Architecture**: A consortium blockchain where multiple trusted entities (e.g., community organizations, local government) operate validator nodes
 - **Smart Contracts**: Implement voting logic as smart contracts (chaincode) that:
@@ -61,9 +69,9 @@ For audit logging and other system records, we will use traditional database sys
 - **Access Controls**: Implement strict access controls and monitoring for audit log access
 - **Separation of Duties**: Ensure no single administrator can modify logs without detection
 
-### Implementation Approach
+### Historical Implementation Approach
 
-We will take a phased approach to implementation:
+The original proposal described these phases:
 
 - **Phase 1**: Develop a proof of concept for the blockchain voting system with simulated data
 - **Phase 2**: Implement the core voting blockchain with basic functionality
@@ -112,6 +120,12 @@ We will take a phased approach to implementation:
 - **Documentation**: Maintain detailed documentation of both the blockchain voting architecture and traditional audit logging systems
 
 ## Notes
+
+- [ADR 0008](0008-relational-vote-ledger.md) defines the current MVP proposal.
+- If a permissioned ledger becomes a firm requirement, Hyperledger Iroha 2 is
+  the first open-source Rust-native candidate to evaluate. Fabric remains an
+  alternative only if the project accepts a non-Rust adapter and chaincode
+  implementation.
 
 - Reference: [Hyperledger Fabric Documentation](https://hyperledger-fabric.readthedocs.io/)
 - Reference: [NIST Blockchain Technology Overview](https://nvlpubs.nist.gov/nistpubs/ir/2018/NIST.IR.8202.pdf)

@@ -8,7 +8,7 @@ This directory contains the [Docusaurus](https://docusaurus.io/) configuration f
 - `sidebars.js`: Sidebar configuration for the documentation
 - `src/`: Custom React components and CSS
 - `static/`: Static assets like images and favicon
-- `architecture/`, `development/`, `models/`: Documentation content organized by category
+- `../architecture/`, `../product/`, `../development/`, `../models/`: Documentation content organized by category
 - `intro.md`: Introduction page for the documentation
 
 ## Getting Started
@@ -17,8 +17,8 @@ To run the documentation site locally:
 
 ```bash
 # Install dependencies
-cd docs
-npm install
+cd docs/website
+npm ci
 
 # Start the development server
 npm start
@@ -32,7 +32,7 @@ To build the documentation site for production:
 
 ```bash
 # Build the site
-cd docs
+cd docs/website
 npm run build
 ```
 
@@ -44,7 +44,7 @@ To serve the built website locally:
 
 ```bash
 # Serve the built site
-cd docs
+cd docs/website
 npm run serve
 ```
 
@@ -54,7 +54,7 @@ This will start a local server to serve the built site.
 
 ### Adding New Documentation
 
-1. Add your Markdown files to the appropriate subdirectory in the `docs` directory
+1. Add Markdown files to the appropriate subdirectory under the parent `docs` directory
 2. Update `sidebars.js` to include your new documentation
 3. Restart the development server to see your changes
 
