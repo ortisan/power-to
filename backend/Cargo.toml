@@ -1,0 +1,64 @@
+[workspace]
+members = [
+  "apps/api",
+  "apps/worker",
+  "crates/adapters",
+  "crates/application",
+  "crates/domain",
+  "crates/test-support",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT"
+repository = "https://github.com/ortisan/power-to"
+
+[workspace.dependencies]
+anyhow = "1.0.103"
+async-trait = "0.1.89"
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "matched-path", "query", "tokio", "tracing"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde"] }
+diesel = { version = "~2.3.11", default-features = false, features = ["32-column-tables", "chrono", "serde_json", "uuid"] }
+diesel-async = { version = "0.9.2", features = ["bb8", "postgres"] }
+opentelemetry = { version = "0.32.0", default-features = false, features = ["logs", "metrics", "trace"] }
+opentelemetry-appender-tracing = { version = "0.32.0", default-features = false }
+opentelemetry-http = { version = "0.32.0", default-features = false }
+opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["grpc-tonic", "logs", "metrics", "tls-ring", "tls-roots", "trace"] }
+opentelemetry_sdk = { version = "0.32.1", default-features = false, features = ["logs", "metrics", "trace"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+sha2 = "0.11.0"
+thiserror = "2.0.18"
+tokio = { version = "1.52.4", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tower = { version = "0.5.3", features = ["util"] }
+tower-http = { version = "0.7.0", features = ["request-id", "sensitive-headers", "timeout", "trace"] }
+tracing = "0.1.44"
+tracing-opentelemetry = { version = "0.33.0", default-features = false }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json", "registry"] }
+utoipa = { version = "5.5.0", features = ["axum_extras", "chrono", "uuid"] }
+uuid = { version = "1.24.0", features = ["v4", "v7"] }
+
+powerto-adapters = { path = "crates/adapters" }
+powerto-application = { path = "crates/application" }
+powerto-domain = { path = "crates/domain" }
+powerto-test-support = { path = "crates/test-support" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "deny"
+expect_used = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"

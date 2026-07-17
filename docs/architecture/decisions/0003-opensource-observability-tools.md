@@ -7,7 +7,12 @@ title: Open-Source Observability Tools
 
 ## Status
 
-PROPOSED
+SUPERSEDED on 2026-07-16 by
+[ADR 0010](0010-opentelemetry-victoria-observability.md).
+
+This record is retained as historical context. Prometheus, Loki, and Jaeger
+are not the selected telemetry backends, and Kubernetes is not required for
+the initial observability deployment.
 
 ## Context
 

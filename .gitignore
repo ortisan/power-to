@@ -48,7 +48,6 @@ android/.gradle
 *.ipr
 *.iws
 .DS_Store
-*.lock
 *.log
 *.bak
 *.tmp
@@ -56,7 +55,7 @@ android/.gradle
 
 # Rust
 /target/
-Cargo.lock
+/backend/target/
 **/*.rs.bk
 *.pdb
 
