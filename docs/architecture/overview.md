@@ -45,10 +45,12 @@ idempotency reservation, a hash-linked append-only audit event, and one outbox
 message in the same transaction. The worker is only a composition-root
 foundation and does not process the outbox yet.
 
-OIDC actor resolution is still pending, so both issue routes fail closed with
-`401` by default. An insecure account header exists solely as an explicitly
-enabled local test seam; process configuration restricts it to the `local`
-environment and a loopback HTTP bind. It is not production authentication.
+OIDC actor resolution is implemented for both issue routes. The API validates
+strict JWT access tokens against provider discovery and cached JWKS, then maps
+the verified issuer/subject pair to a private local account. An insecure account
+header remains solely as an explicitly enabled local test seam; process
+configuration restricts it to the `local` environment and a loopback HTTP bind,
+and never enables it at the same time as OIDC.
 
 The current category value is a validated slug, not a canonical
 jurisdiction-owned category, and the slice does not derive a jurisdiction.
@@ -152,7 +154,7 @@ backend/
     adapters/                # diesel-async persistence, readiness, config, telemetry
     test-support/            # deterministic readiness and issue-store test doubles
   db/
-    migrations/             # Atlas bootstrap + issue-intake SQL and atlas.sum
+    migrations/             # Atlas bootstrap, issue intake, OIDC identity, and atlas.sum
     atlas.hcl                # environment-driven migration configuration
   deploy/observability/      # Collector and local Victoria Compose stack
 
@@ -256,8 +258,9 @@ public election system.
 - JSON REST endpoints are versioned under `/api/v1` and described by OpenAPI
   3.1 generated from the Rust code.
 - The implemented issue routes are `POST /api/v1/me/issues` and
-  `GET /api/v1/me/issues/{issue_ref}`. Both require an actor; until OIDC is
-  implemented they are closed except for the loopback-only local test seam.
+  `GET /api/v1/me/issues/{issue_ref}`. Both require a verified bearer actor;
+  `(issuer, subject)` resolves to a private UUIDv7 account without retaining the
+  raw token or profile claims. The loopback-only local header is a test seam.
 - Issue submission requires a UUID idempotency key. An exact retry returns the
   same issue's current owner-scoped representation without a second write,
   while reuse for a changed command conflicts. Only the key digest and a

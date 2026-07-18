@@ -11,6 +11,7 @@ repository.workspace = true
 async-trait.workspace = true
 diesel.workspace = true
 diesel-async.workspace = true
+jsonwebtoken.workspace = true
 chrono.workspace = true
 opentelemetry.workspace = true
 opentelemetry-appender-tracing.workspace = true
@@ -18,6 +19,8 @@ opentelemetry-otlp.workspace = true
 opentelemetry_sdk.workspace = true
 powerto-application.workspace = true
 powerto-domain.workspace = true
+reqwest.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
@@ -29,3 +32,7 @@ uuid.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+rand.workspace = true
+rsa.workspace = true

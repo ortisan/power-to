@@ -14,6 +14,7 @@ use opentelemetry::{KeyValue, global, metrics::Histogram};
 use opentelemetry_http::HeaderExtractor;
 use powerto_application::{
     health::ReadinessProbe,
+    identity::{ActorAuthenticator, AuthenticationError, PresentedCredential},
     issues::{
         GetOwnIssueError, IdempotencyKey, IssueService, SubmissionDisposition, SubmitIssueCommand,
         SubmitIssueError,
@@ -36,14 +37,16 @@ const IDEMPOTENCY_HEADER: &str = "idempotency-key";
 const IDEMPOTENCY_REPLAYED_HEADER: &str = "idempotency-replayed";
 const ISSUE_BODY_LIMIT_BYTES: usize = 64 * 1024;
 
-/// Controls the deliberately temporary local actor adapter.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LocalActorHeaderMode {
-    /// Reject issue routes until a real authenticated actor resolver exists.
+/// Selects the authenticated actor adapter at the composition root.
+#[derive(Clone)]
+pub enum ActorAuthentication {
+    /// Reject protected routes when authentication is not configured.
     Disabled,
     /// Trust a local account UUID header. The binary only permits this mode in
     /// the `local` environment while bound to a loopback address.
-    InsecureLoopbackOnly,
+    InsecureLoopbackHeader,
+    /// Authenticate RFC 9068 JWT access tokens through the application port.
+    Oidc(Arc<dyn ActorAuthenticator>),
 }
 
 /// Shared state for the HTTP inbound adapter.
@@ -51,7 +54,7 @@ pub enum LocalActorHeaderMode {
 pub struct ApiState {
     readiness: Arc<dyn ReadinessProbe>,
     issues: IssueService,
-    local_actor_header_mode: LocalActorHeaderMode,
+    actor_authentication: ActorAuthentication,
     metrics: ApiMetrics,
 }
 
@@ -61,7 +64,7 @@ impl ApiState {
     pub fn new(
         readiness: Arc<dyn ReadinessProbe>,
         issues: IssueService,
-        local_actor_header_mode: LocalActorHeaderMode,
+        actor_authentication: ActorAuthentication,
     ) -> Self {
         let meter = global::meter("powerto-api");
         let request_duration = meter
@@ -73,7 +76,7 @@ impl ApiState {
         Self {
             readiness,
             issues,
-            local_actor_header_mode,
+            actor_authentication,
             metrics: ApiMetrics { request_duration },
         }
     }
@@ -210,20 +213,21 @@ async fn readiness(State(state): State<ApiState>) -> Response {
     post,
     path = "/api/v1/me/issues",
     params(
-        ("Idempotency-Key" = String, Header, description = "High-entropy UUID for safe retries"),
-        ("x-powerto-local-account-id" = String, Header, description = "Local loopback-only development actor; not authentication")
+        ("Idempotency-Key" = String, Header, description = "High-entropy UUID for safe retries")
     ),
+    security(("bearer_auth" = [])),
     request_body = SubmitIssueRequest,
     responses(
         (status = 201, description = "Issue submitted", body = OwnIssueResponse),
         (status = 200, description = "Existing issue returned for an exact command replay", body = OwnIssueResponse),
         (status = 400, description = "Malformed request or idempotency key", body = ProblemDetails),
-        (status = 401, description = "Authenticated actor unavailable", body = ProblemDetails),
+        (status = 401, description = "Bearer access token is missing or invalid", body = ProblemDetails),
+        (status = 403, description = "Authenticated account cannot act", body = ProblemDetails),
         (status = 409, description = "Idempotency or policy conflict", body = ProblemDetails),
         (status = 413, description = "Request body exceeds the limit", body = ProblemDetails),
         (status = 422, description = "Issue input violates domain policy", body = ProblemDetails),
         (status = 500, description = "Stored data violates an invariant", body = ProblemDetails),
-        (status = 503, description = "Persistence unavailable", body = ProblemDetails)
+        (status = 503, description = "Authentication or persistence unavailable", body = ProblemDetails)
     ),
     tag = "own issues"
 )]
@@ -232,9 +236,9 @@ async fn submit_issue(
     headers: HeaderMap,
     payload: Result<Json<SubmitIssueRequest>, JsonRejection>,
 ) -> Response {
-    let account_id = match local_account(&state, &headers) {
+    let account_id = match resolve_account(&state, &headers).await {
         Ok(account_id) => account_id,
-        Err(error) => return local_account_error(error),
+        Err(error) => return authentication_error(error),
     };
     let idempotency_key = match idempotency_key(&headers) {
         Ok(key) => key,
@@ -276,16 +280,15 @@ async fn submit_issue(
 #[utoipa::path(
     get,
     path = "/api/v1/me/issues/{issue_ref}",
-    params(
-        ("issue_ref" = String, Path, description = "Opaque random issue reference"),
-        ("x-powerto-local-account-id" = String, Header, description = "Local loopback-only development actor; not authentication")
-    ),
+    params(("issue_ref" = String, Path, description = "Opaque random issue reference")),
+    security(("bearer_auth" = [])),
     responses(
         (status = 200, description = "Owner-scoped issue", body = OwnIssueResponse),
-        (status = 401, description = "Authenticated actor unavailable", body = ProblemDetails),
+        (status = 401, description = "Bearer access token is missing or invalid", body = ProblemDetails),
+        (status = 403, description = "Authenticated account cannot act", body = ProblemDetails),
         (status = 404, description = "Issue absent or owned by another account", body = ProblemDetails),
         (status = 500, description = "Stored data violates an invariant", body = ProblemDetails),
-        (status = 503, description = "Persistence unavailable", body = ProblemDetails)
+        (status = 503, description = "Authentication or persistence unavailable", body = ProblemDetails)
     ),
     tag = "own issues"
 )]
@@ -294,9 +297,9 @@ async fn get_own_issue(
     headers: HeaderMap,
     Path(issue_ref): Path<String>,
 ) -> Response {
-    let account_id = match local_account(&state, &headers) {
+    let account_id = match resolve_account(&state, &headers).await {
         Ok(account_id) => account_id,
-        Err(error) => return local_account_error(error),
+        Err(error) => return authentication_error(error),
     };
     let reference = match Uuid::parse_str(&issue_ref) {
         Ok(reference) => IssueReference::from_uuid(reference),
@@ -313,39 +316,100 @@ async fn get_own_issue(
     }
 }
 
-#[derive(Clone, Copy)]
-enum LocalAccountError {
-    Disabled,
-    MissingOrInvalid,
+async fn resolve_account(
+    state: &ApiState,
+    headers: &HeaderMap,
+) -> Result<AccountId, AuthenticationError> {
+    match &state.actor_authentication {
+        ActorAuthentication::Disabled => Err(AuthenticationError::InvalidCredential),
+        ActorAuthentication::InsecureLoopbackHeader => {
+            let mut values = headers
+                .get_all(HeaderName::from_static(LOCAL_ACCOUNT_HEADER))
+                .iter();
+            let value = values
+                .next()
+                .ok_or(AuthenticationError::InvalidCredential)?;
+            if values.next().is_some() {
+                return Err(AuthenticationError::InvalidCredential);
+            }
+            value
+                .to_str()
+                .ok()
+                .and_then(|value| Uuid::parse_str(value).ok())
+                .map(AccountId::from_uuid)
+                .ok_or(AuthenticationError::InvalidCredential)
+        }
+        ActorAuthentication::Oidc(authenticator) => {
+            let token = bearer_token(headers)?;
+            let credential = PresentedCredential::new(token.to_owned());
+            authenticator
+                .authenticate(&credential)
+                .await
+                .map(|actor| actor.account_id())
+        }
+    }
 }
 
-fn local_account(state: &ApiState, headers: &HeaderMap) -> Result<AccountId, LocalAccountError> {
-    if state.local_actor_header_mode == LocalActorHeaderMode::Disabled {
-        return Err(LocalAccountError::Disabled);
+fn bearer_token(headers: &HeaderMap) -> Result<&str, AuthenticationError> {
+    let mut values = headers.get_all(header::AUTHORIZATION).iter();
+    let value = values
+        .next()
+        .ok_or(AuthenticationError::InvalidCredential)?;
+    if values.next().is_some() {
+        return Err(AuthenticationError::InvalidCredential);
     }
-
-    let account_id = headers
-        .get(HeaderName::from_static(LOCAL_ACCOUNT_HEADER))
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| Uuid::parse_str(value).ok());
-    match account_id {
-        Some(account_id) => Ok(AccountId::from_uuid(account_id)),
-        None => Err(LocalAccountError::MissingOrInvalid),
+    let value = value
+        .to_str()
+        .map_err(|_| AuthenticationError::InvalidCredential)?;
+    let (scheme, token) = value
+        .split_once(' ')
+        .ok_or(AuthenticationError::InvalidCredential)?;
+    if !scheme.eq_ignore_ascii_case("Bearer")
+        || token.is_empty()
+        || token.len() > 16 * 1024
+        || token.contains(char::is_whitespace)
+    {
+        return Err(AuthenticationError::InvalidCredential);
     }
+    Ok(token)
 }
 
-fn local_account_error(error: LocalAccountError) -> Response {
-    let detail = match error {
-        LocalAccountError::Disabled => "OIDC actor resolution is not available in this deployment.",
-        LocalAccountError::MissingOrInvalid => "A valid local development actor is required.",
-    };
-    problem_response(
-        StatusCode::UNAUTHORIZED,
-        "urn:powerto:problem:authentication-required",
-        "Authentication required",
-        "AUTHENTICATION_REQUIRED",
-        detail,
-    )
+fn authentication_error(error: AuthenticationError) -> Response {
+    match error {
+        AuthenticationError::InvalidCredential => {
+            let mut response = problem_response(
+                StatusCode::UNAUTHORIZED,
+                "urn:powerto:problem:authentication-required",
+                "Authentication required",
+                "AUTHENTICATION_REQUIRED",
+                "A valid bearer access token is required.",
+            );
+            response
+                .headers_mut()
+                .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+            response
+        }
+        AuthenticationError::Forbidden => problem_response(
+            StatusCode::FORBIDDEN,
+            "urn:powerto:problem:account-forbidden",
+            "Account forbidden",
+            "ACCOUNT_FORBIDDEN",
+            "This account is not allowed to perform the operation.",
+        ),
+        AuthenticationError::Unavailable => {
+            let mut response = problem_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "urn:powerto:problem:authentication-unavailable",
+                "Service unavailable",
+                "AUTHENTICATION_UNAVAILABLE",
+                "Authentication is temporarily unavailable.",
+            );
+            response
+                .headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
+            response
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -651,12 +715,34 @@ struct ConfirmedPointResponse {
         OwnIssueResponse,
         ConfirmedPointResponse
     )),
+    modifiers(&SecurityAddon),
     tags(
         (name = "health", description = "Process and dependency health"),
         (name = "own issues", description = "Private issue intake and owner-scoped reads")
     )
 )]
 struct ApiDoc;
+
+struct SecurityAddon;
+
+impl utoipa::Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
+
+        if let Some(components) = openapi.components.as_mut() {
+            components.add_security_scheme(
+                "bearer_auth",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("at+jwt")
+                        .description(Some("OIDC JWT access token for the PowerTo API"))
+                        .build(),
+                ),
+            );
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -666,22 +752,23 @@ mod tests {
         body::{Body, to_bytes},
         http::{Method, Request},
     };
-    use powerto_application::issues::IssueService;
-    use powerto_test_support::{FixedReadiness, InMemoryIssueStore};
+    use powerto_application::{identity::AuthenticationError, issues::IssueService};
+    use powerto_domain::AccountId;
+    use powerto_test_support::{FixedAuthenticator, FixedReadiness, InMemoryIssueStore};
     use serde_json::{Value, json};
     use tower::ServiceExt as _;
     use utoipa::OpenApi as _;
     use uuid::Uuid;
 
-    use super::{ApiDoc, ApiState, LocalActorHeaderMode, router};
+    use super::{ActorAuthentication, ApiDoc, ApiState, router};
 
     const ACTOR_HEADER: &str = "x-powerto-local-account-id";
 
-    fn state(mode: LocalActorHeaderMode) -> ApiState {
+    fn state(authentication: ActorAuthentication) -> ApiState {
         ApiState::new(
             Arc::new(FixedReadiness::ready()),
             IssueService::new(Arc::new(InMemoryIssueStore::default()), "privacy-v1"),
-            mode,
+            authentication,
         )
     }
 
@@ -708,7 +795,7 @@ mod tests {
         let app = router(ApiState::new(
             Arc::new(FixedReadiness::unavailable()),
             IssueService::new(Arc::new(InMemoryIssueStore::default()), "privacy-v1"),
-            LocalActorHeaderMode::Disabled,
+            ActorAuthentication::Disabled,
         ));
         let response = send(&app, Method::GET, "/health/live", None, None, None).await;
 
@@ -724,7 +811,7 @@ mod tests {
         let app = router(ApiState::new(
             Arc::new(FixedReadiness::unavailable()),
             IssueService::new(Arc::new(InMemoryIssueStore::default()), "privacy-v1"),
-            LocalActorHeaderMode::Disabled,
+            ActorAuthentication::Disabled,
         ));
         let response = send(&app, Method::GET, "/health/ready", None, None, None).await;
 
@@ -742,7 +829,7 @@ mod tests {
 
     #[tokio::test]
     async fn submit_replay_and_owner_scope_are_enforced() {
-        let app = router(state(LocalActorHeaderMode::InsecureLoopbackOnly));
+        let app = router(state(ActorAuthentication::InsecureLoopbackHeader));
         let actor = Uuid::new_v4().to_string();
         let other_actor = Uuid::new_v4().to_string();
         let key = Uuid::new_v4().to_string();
@@ -800,7 +887,7 @@ mod tests {
 
     #[tokio::test]
     async fn same_key_with_changed_command_returns_conflict() {
-        let app = router(state(LocalActorHeaderMode::InsecureLoopbackOnly));
+        let app = router(state(ActorAuthentication::InsecureLoopbackHeader));
         let actor = Uuid::new_v4().to_string();
         let key = Uuid::new_v4().to_string();
         let original = valid_payload();
@@ -832,7 +919,7 @@ mod tests {
 
     #[tokio::test]
     async fn issue_routes_are_closed_when_local_actor_mode_is_disabled() {
-        let app = router(state(LocalActorHeaderMode::Disabled));
+        let app = router(state(ActorAuthentication::Disabled));
         let response = send(
             &app,
             Method::POST,
@@ -844,6 +931,72 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response.headers().get(axum::http::header::WWW_AUTHENTICATE),
+            Some(&axum::http::HeaderValue::from_static("Bearer"))
+        );
+    }
+
+    #[tokio::test]
+    async fn oidc_bearer_actor_can_submit_and_local_header_is_not_trusted() {
+        let account_id = AccountId::new();
+        let app = router(state(ActorAuthentication::Oidc(Arc::new(
+            FixedAuthenticator::authenticated(account_id),
+        ))));
+        let key = Uuid::new_v4().to_string();
+        let rejected = send(
+            &app,
+            Method::POST,
+            "/api/v1/me/issues",
+            Some(&account_id.into_uuid().to_string()),
+            Some(&key),
+            Some(valid_payload().to_string()),
+        )
+        .await;
+        assert_eq!(rejected.status(), axum::http::StatusCode::UNAUTHORIZED);
+
+        let accepted = send_bearer(
+            &app,
+            Method::POST,
+            "/api/v1/me/issues",
+            "opaque-access-token",
+            Some(&key),
+            Some(valid_payload().to_string()),
+        )
+        .await;
+        assert_eq!(accepted.status(), axum::http::StatusCode::CREATED);
+    }
+
+    #[tokio::test]
+    async fn oidc_failures_have_stable_http_semantics() {
+        for (error, expected) in [
+            (
+                AuthenticationError::InvalidCredential,
+                axum::http::StatusCode::UNAUTHORIZED,
+            ),
+            (
+                AuthenticationError::Forbidden,
+                axum::http::StatusCode::FORBIDDEN,
+            ),
+            (
+                AuthenticationError::Unavailable,
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            ),
+        ] {
+            let app = router(state(ActorAuthentication::Oidc(Arc::new(
+                FixedAuthenticator::failing(error),
+            ))));
+            let response = send_bearer(
+                &app,
+                Method::GET,
+                "/api/v1/me/issues/00000000-0000-4000-8000-000000000000",
+                "opaque-access-token",
+                None,
+                None,
+            )
+            .await;
+            assert_eq!(response.status(), expected);
+        }
     }
 
     #[test]
@@ -856,6 +1009,10 @@ mod tests {
                 assert!(document["paths"]["/health/ready"].is_object());
                 assert!(document["paths"]["/api/v1/me/issues"].is_object());
                 assert!(document["paths"]["/api/v1/me/issues/{issue_ref}"].is_object());
+                assert_eq!(
+                    document["components"]["securitySchemes"]["bearer_auth"]["scheme"],
+                    "bearer"
+                );
             }
             Err(error) => panic!("OpenAPI document was not serializable: {error}"),
         }
@@ -869,12 +1026,38 @@ mod tests {
         idempotency_key: Option<&str>,
         body: Option<String>,
     ) -> axum::response::Response {
+        send_with_auth(app, method, path, actor, None, idempotency_key, body).await
+    }
+
+    async fn send_bearer(
+        app: &axum::Router,
+        method: Method,
+        path: &str,
+        token: &str,
+        idempotency_key: Option<&str>,
+        body: Option<String>,
+    ) -> axum::response::Response {
+        send_with_auth(app, method, path, None, Some(token), idempotency_key, body).await
+    }
+
+    async fn send_with_auth(
+        app: &axum::Router,
+        method: Method,
+        path: &str,
+        actor: Option<&str>,
+        bearer: Option<&str>,
+        idempotency_key: Option<&str>,
+        body: Option<String>,
+    ) -> axum::response::Response {
         let mut builder = Request::builder().method(method).uri(path);
         if let Some(actor) = actor {
             builder = builder.header(ACTOR_HEADER, actor);
         }
         if let Some(idempotency_key) = idempotency_key {
             builder = builder.header("idempotency-key", idempotency_key);
+        }
+        if let Some(token) = bearer {
+            builder = builder.header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"));
         }
         let request_body = match body {
             Some(body) => {
