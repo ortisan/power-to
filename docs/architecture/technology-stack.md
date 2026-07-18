@@ -47,7 +47,7 @@ the first vertical slice.
 | Background work | PostgreSQL transactional outbox processed by the Rust worker | PROPOSED | Reliable work with one source of truth and no broker in the MVP |
 | Observability | `tracing` + OpenTelemetry/OTLP Collector + VictoriaMetrics, VictoriaLogs, and VictoriaTraces | **ACCEPTED** | Explicit project decision; vendor-neutral instrumentation with open-source Victoria backends |
 | Local development | Docker Compose for PostgreSQL/PostGIS, OIDC, telemetry, and storage emulators | PROPOSED | Reproducible dependencies while Rust and Node processes retain fast local feedback; real provider contract tests remain required |
-| CI | GitHub Actions, Rust checks, Atlas migration validation, frontend checks, and dependency audit | PROPOSED | Matches the repository and keeps quality gates reviewable in public |
+| CI | GitHub Actions with Rust, Atlas/PostGIS integration, documentation, and deployment-manifest checks | PROPOSED / FIRST WORKFLOW IMPLEMENTED | Matches the repository and keeps quality gates reviewable in public; dependency audit remains pending |
 | Deployment | OCI containers on a managed container platform | PROPOSED | Portable, simple operations; no Kubernetes until scaling or isolation evidence exists |
 
 ## Rust backend

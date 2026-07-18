@@ -79,8 +79,8 @@ column can be used for public maps or lists.
 
 ## Prerequisites
 
-- an Atlas CLI distribution; pin its exact version and licensing distribution
-  before this workflow is shared through CI or used for a release;
+- Atlas CLI v1.2.0, matching the version pinned by CI; review licensing before
+  changing its distribution or enabling non-Community capabilities;
 - PostgreSQL 18 with the PostGIS 3.6 extension package available;
 - an empty database for a first apply;
 - a dedicated migration role allowed to create the PostGIS extension and

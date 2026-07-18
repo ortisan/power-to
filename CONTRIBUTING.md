@@ -61,9 +61,22 @@ To set up PowerTo for local development:
    Now you can make your changes locally.
 
 4. When you're done making changes, check that your changes pass the tests and lint checks:
+   ```sh
+   cd backend
+   cargo fmt --all -- --check
+   cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+   cargo test --locked --workspace --all-targets
+   (cd db && atlas migrate validate --dir file://migrations)
+
+   cd ../docs/website
+   npm ci --ignore-scripts
+   npm run build
    ```
-   # Commands will be added as the project develops
-   ```
+
+   Pull requests also replay the complete Atlas history and run the ignored
+   Diesel integration tests against a disposable PostgreSQL/PostGIS service.
+   See [the backend guide](backend/README.md#quality-checks) for the equivalent
+   local database workflow.
 
 5. Commit your changes and push your branch to GitHub:
    ```

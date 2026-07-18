@@ -1,5 +1,7 @@
 # PowerTo
 
+[![Quality](https://github.com/ortisan/power-to/actions/workflows/quality.yml/badge.svg)](https://github.com/ortisan/power-to/actions/workflows/quality.yml)
+
 **Open-source civic infrastructure for turning local problems into transparent,
 accountable action.**
 
