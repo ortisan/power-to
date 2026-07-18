@@ -230,14 +230,21 @@ planned rather than implemented.
 
 ## Quality checks
 
+GitHub Actions runs these checks for every pull request and `main` push. The
+workflow uses the repository's pinned Rust toolchain, Node.js 24, Atlas v1.2.0,
+and PostgreSQL 18/PostGIS 3.6. Third-party actions are pinned to commit SHAs and
+receive only read access to repository contents.
+
 ```sh
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-targets
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-targets
 (cd db && atlas migrate validate --dir file://migrations)
 docker compose config --quiet
 docker compose -f deploy/observability/compose.yaml config --quiet
 ```
 
 Integration replay of Atlas migrations requires a disposable PostgreSQL 18
-database with PostGIS 3.6; see the database README for the safe command.
+database with PostGIS 3.6; see the database README for the safe command. CI
+creates a clean database from `template0`, applies every Atlas migration, and
+runs all ignored `powerto-adapters` integration tests serially.

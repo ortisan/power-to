@@ -1,0 +1,143 @@
+name: Quality
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  rust:
+    name: Rust workspace
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Show pinned toolchain
+        run: rustc --version && cargo --version
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Run unit and boundary tests
+        run: cargo test --locked --workspace --all-targets
+
+  postgres:
+    name: PostgreSQL and Atlas integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgis/postgis:18-3.6@sha256:c893f6f2652d11e13f50f8623045b3523991b41d038b4d213dc040f42641f0d7
+        env:
+          POSTGRES_DB: powerto_image_bootstrap
+          POSTGRES_PASSWORD: powerto-ci-only
+          POSTGRES_USER: powerto
+        options: >-
+          --health-cmd "pg_isready -U powerto -d powerto_image_bootstrap"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+        ports:
+          - 5432/tcp
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Atlas CLI
+        uses: ariga/setup-atlas@2f3c785c89a15e1c0d07bcae3900fb5feb969eea # v0.3
+        with:
+          version: v1.2.0
+
+      - name: Create clean Atlas-owned database
+        run: >-
+          docker exec -i "${{ job.services.postgres.id }}"
+          psql -v ON_ERROR_STOP=1 -U powerto -d powerto_image_bootstrap
+          < backend/deploy/postgres/20_create_clean_database.sql
+
+      - name: Validate migration integrity
+        working-directory: backend/db
+        run: atlas migrate validate --dir file://migrations
+
+      - name: Replay complete migration history
+        working-directory: backend/db
+        env:
+          DATABASE_URL: postgres://powerto:powerto-ci-only@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/powerto?sslmode=disable
+        run: |
+          atlas migrate apply --env local
+          atlas migrate status --env local
+
+      - name: Run PostgreSQL integration tests
+        working-directory: backend
+        env:
+          POWERTO_TEST_DATABASE_URL: postgres://powerto:powerto-ci-only@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/powerto?sslmode=disable
+        run: cargo test --locked -p powerto-adapters --tests -- --ignored --test-threads=1
+
+  documentation:
+    name: Documentation build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: docs/website
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: docs/website/package-lock.json
+
+      - name: Install locked documentation dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build documentation
+        run: npm run build
+
+  configuration:
+    name: Deployment configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Validate backend Compose manifest
+        working-directory: backend
+        run: docker compose config --quiet
+
+      - name: Validate observability Compose manifest
+        working-directory: backend
+        run: docker compose -f deploy/observability/compose.yaml config --quiet
